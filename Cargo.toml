@@ -1,0 +1,20 @@
+[package]
+name = "zygote"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+clone3 = { version = "0.2", default-features = false }
+byteorder = "1"
+rmp-serde = "1"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+anyhow = { version = "1", optional = true }
+log = "0.4"
+thiserror = "2"
+withfd = "0.2"
+
+[features]
+default = [ "anyhow" ]
+anyhow = [ "dep:anyhow" ]
