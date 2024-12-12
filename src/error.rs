@@ -68,21 +68,6 @@ impl WireError {
         .into_wire_error()
     }
 
-    /*
-    pub(crate) fn new_with_backtrace(
-        err: &(impl StdError + ?Sized),
-        backtrace: &Backtrace,
-    ) -> Self {
-        WireErrorInner {
-            description: err.to_string(),
-            source: err.source().map(|src| Box::new(Self::new(src).0)),
-            backtrace: (backtrace.status() == BacktraceStatus::Captured)
-                .then_some(backtrace.to_string()),
-        }
-        .into_wire_error()
-    }
-    */
-
     pub(crate) fn from_panic(info: &PanicHookInfo, backtrace: &Backtrace) -> Self {
         WireErrorInner {
             description: info.to_string(),
@@ -93,14 +78,6 @@ impl WireError {
         .into_wire_error()
     }
 }
-
-/*
-impl WireError {
-    pub fn into_std(self) -> StdWireError {
-        self.0
-    }
-}
-*/
 
 impl AsRef<dyn StdError> for WireError {
     fn as_ref(&self) -> &(dyn StdError + 'static) {
@@ -180,13 +157,3 @@ impl Debug for WireError {
         write!(f, "{}", self.0)
     }
 }
-
-/*
-impl Codec for WireError {
-    type Output = WireError;
-
-    fn serialize(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
-
-    }
-}
-*/
