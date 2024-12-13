@@ -26,7 +26,40 @@ pub enum Error {
     Wire(#[from] WireError),
 }
 
-/// A serializable error type
+/// A serializable error type.
+/// 
+/// To run a fallible task that returns a [`Result`], you need to make
+/// sure that both variants ([`Ok`] and [`Err`]) are serializable.
+/// For example, [`std::io::Error`] is not serializable.
+/// 
+/// ```rust,compile_fail
+/// # use std::fs;
+/// # use std::io;
+/// # use zygote::Zygote;
+/// # use zygote::error::WireError;
+/// Zygote::global().run(|_| -> Result<String, io::Error> {
+///     let msg = fs::read_to_string("message.txt")?;
+///     Ok(msg)
+/// }, ());
+/// ```
+/// 
+/// [`WireError`] is an error type that can be serialized.
+/// It can be converted from any type that implements the
+/// [`core::error::Error`] trait (similar to `anyhow::Error`),
+/// making it a good catch-all error type.
+/// 
+/// ```rust
+/// # use std::fs;
+/// # use zygote::Zygote;
+/// # use zygote::error::WireError;
+/// Zygote::global().run(|_| -> Result<String, WireError> {
+///     let msg = fs::read_to_string("message.txt")?;
+///     Ok(msg)
+/// }, ());
+/// ```
+/// 
+/// This is also the error type used by [`Zygote::try_run()`](crate::Zygote::try_run) to
+/// signal panics during the task execution.
 #[derive(Serialize, Deserialize, Clone)]
 #[repr(transparent)]
 pub struct WireError(WireErrorInner);
