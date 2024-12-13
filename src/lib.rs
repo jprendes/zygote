@@ -29,7 +29,7 @@ use pipe::Pipe;
 use serde::{Deserialize, Serialize};
 
 //#[doc(hidden)]
-pub mod codec;
+mod codec;
 pub mod error;
 #[doc(hidden)]
 pub mod fds;
@@ -175,7 +175,7 @@ impl Zygote {
             }
             _child_pid => {
                 drop(child_pipe);
-                let pipe = Mutex::new(SendableFd(parent_pipe));
+                let pipe = Mutex::new(SendableFd::from(parent_pipe));
                 return Self { pipe };
             }
         }

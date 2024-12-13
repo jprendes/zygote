@@ -1,5 +1,4 @@
 use std::io::{Read, Write};
-use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::LazyLock;
 
@@ -23,9 +22,8 @@ fn does_error(_: ()) -> Result<(), WireError> {
     Ok(())
 }
 
-fn write_to_fd(p: SendableFd<OwnedFd>) {
-    let mut p = unsafe { UnixStream::from_raw_fd(p.0.into_raw_fd()) };
-    p.write_all(HELLO_WORLD).unwrap();
+fn write_to_pipe(mut pipe: SendableFd<UnixStream>) {
+    pipe.write_all(HELLO_WORLD).unwrap();
 }
 
 #[test]
@@ -60,8 +58,7 @@ fn large_payload() {
 #[test]
 fn send_fd() {
     let (p1, mut p2) = UnixStream::pair().unwrap();
-    let p1 = SendableFd(p1.into());
-    Zygote::global().run(write_to_fd, p1);
+    Zygote::global().run(write_to_pipe, SendableFd::from(p1));
     let mut msg = vec![0; size_of_val(HELLO_WORLD)];
     p2.read_exact(&mut msg).unwrap();
     assert_eq!(&msg, HELLO_WORLD);

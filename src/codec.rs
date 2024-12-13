@@ -1,12 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-mod private {
-    pub trait SealedCodec {}
-
-    pub trait SealedCodecAsRef<T> {}
+mod sealed {
+    pub trait Codec {}
+    pub trait AsCodecRef<T> {}
 }
 
-pub trait Codec: Serialize + for<'a> Deserialize<'a> + private::SealedCodec {
+pub trait Codec: Serialize + for<'a> Deserialize<'a> + sealed::Codec {
     fn deserialize(buf: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
         rmp_serde::from_slice(buf)
     }
@@ -15,26 +14,26 @@ pub trait Codec: Serialize + for<'a> Deserialize<'a> + private::SealedCodec {
     }
 }
 
-impl<T: Serialize + for<'a> Deserialize<'a>> private::SealedCodec for T {}
-impl<T: Serialize + for<'a> Deserialize<'a> + private::SealedCodec> Codec for T {}
+impl<T: Serialize + for<'a> Deserialize<'a>> sealed::Codec for T {}
+impl<T: Serialize + for<'a> Deserialize<'a> + sealed::Codec> Codec for T {}
 
-pub trait AsCodecRef<T: Codec + ?Sized>: private::SealedCodecAsRef<T> {
+pub trait AsCodecRef<T: Codec + ?Sized>: sealed::AsCodecRef<T> {
     fn as_codec_ref(&self) -> &T;
 }
 
-impl<T: Codec + ?Sized> private::SealedCodecAsRef<T> for T {}
+impl<T: Codec + ?Sized> sealed::AsCodecRef<T> for T {}
 
-impl<T: Codec + ?Sized + private::SealedCodecAsRef<T>> AsCodecRef<T> for T {
+impl<T: Codec + ?Sized + sealed::AsCodecRef<T>> AsCodecRef<T> for T {
     fn as_codec_ref(&self) -> &T {
         self
     }
 }
 
-impl<T: Codec + ?Sized> private::SealedCodecAsRef<T> for &T {}
+impl<T: Codec + ?Sized> sealed::AsCodecRef<T> for &T {}
 
 impl<'a, T: Codec + ?Sized> AsCodecRef<T> for &'a T
 where
-    &'a T: private::SealedCodecAsRef<T>,
+    &'a T: sealed::AsCodecRef<T>,
 {
     fn as_codec_ref(&self) -> &T {
         self
