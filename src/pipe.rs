@@ -1,5 +1,6 @@
 use std::io::{self, Read as _, Write as _};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
+use std::mem::transmute;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
 
@@ -89,10 +90,8 @@ impl Pipe {
 
         let bytes = Codec::serialize(data)?;
 
-        let fds: Vec<_> = swap_fds(vec![])
-            .into_iter()
-            .map(|fd| unsafe { BorrowedFd::borrow_raw(fd) })
-            .collect();
+        // safety: BorrowedFd is repr(transparent) over RawFd
+        let fds: Vec<BorrowedFd<'_>> = unsafe { transmute(swap_fds(vec![])) };
 
         self.write_sized(&bytes)?;
         self.write_fds(&fds)?;
@@ -102,22 +101,19 @@ impl Pipe {
 
     pub fn recv<T: Codec>(&mut self) -> Result<T, Error> {
         let buffer = self.read_sized()?;
-        let fds = self
-            .read_fds()?
-            .into_iter()
-            .map(|fd| fd.into_raw_fd())
-            .collect();
+        let fds = self.read_fds()?;
+
+        // safety: OwnedFd is repr(transparent) over RawFd
+        let fds = unsafe { transmute(fds) };
 
         let n = swap_fds(fds).len();
         assert_eq!(n, 0);
 
         let res = Codec::deserialize(&buffer)?;
 
-        let n = swap_fds(vec![])
-            .into_iter()
-            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd) })
-            .count();
-        assert_eq!(n, 0);
+        // safety: OwnedFd is repr(transparent) over RawFd
+        let fds: Vec<OwnedFd> = unsafe { transmute(swap_fds(vec![])) };
+        assert_eq!(fds.len(), 0);
 
         Ok(res)
     }

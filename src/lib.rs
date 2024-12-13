@@ -18,6 +18,7 @@ use std::backtrace::Backtrace;
 use std::cell::Cell;
 use std::io;
 use std::io::ErrorKind::UnexpectedEof;
+use std::mem::transmute;
 use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
@@ -347,8 +348,7 @@ fn zygote_main(mut pipe: Pipe) -> Result<(), Error> {
 
     loop {
         let [f, runner] = pipe.recv::<[usize; 2]>()?;
-        let runner: fn(&mut Pipe, usize) -> Result<(), Error> =
-            unsafe { std::mem::transmute(runner) };
+        let runner: fn(&mut Pipe, usize) -> Result<(), Error> = unsafe { transmute(runner) };
         runner(&mut pipe, f)?;
     }
 }
@@ -357,7 +357,7 @@ fn runner<Args: Codec, Ret: Codec>(pipe: &mut Pipe, f: usize) -> Result<(), Erro
 where
     Result<Ret, WireError>: Codec,
 {
-    let f: fn(Args) -> Ret = unsafe { std::mem::transmute(f) };
+    let f: fn(Args) -> Ret = unsafe { transmute(f) };
     let args = pipe.recv::<Args>()?;
     let res = catch_unwind(|| f(args)).map_err(|_| take_panic());
     pipe.send(&res)?;

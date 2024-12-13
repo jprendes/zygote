@@ -1,6 +1,7 @@
 use std::backtrace::{Backtrace, BacktraceStatus};
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
+use std::mem::transmute;
 use std::ops::{Deref, DerefMut};
 use std::panic::PanicHookInfo;
 
@@ -27,11 +28,11 @@ pub enum Error {
 }
 
 /// A serializable error type.
-/// 
+///
 /// To run a fallible task that returns a [`Result`], you need to make
 /// sure that both variants ([`Ok`] and [`Err`]) are serializable.
 /// For example, [`std::io::Error`] is not serializable.
-/// 
+///
 /// ```rust,compile_fail
 /// # use std::fs;
 /// # use std::io;
@@ -42,12 +43,12 @@ pub enum Error {
 ///     Ok(msg)
 /// }, ());
 /// ```
-/// 
+///
 /// [`WireError`] is an error type that can be serialized.
 /// It can be converted from any type that implements the
 /// [`core::error::Error`] trait (similar to `anyhow::Error`),
 /// making it a good catch-all error type.
-/// 
+///
 /// ```rust
 /// # use std::fs;
 /// # use zygote::Zygote;
@@ -57,7 +58,7 @@ pub enum Error {
 ///     Ok(msg)
 /// }, ());
 /// ```
-/// 
+///
 /// This is also the error type used by [`Zygote::try_run()`](crate::Zygote::try_run) to
 /// signal panics during the task execution.
 #[derive(Serialize, Deserialize, Clone)]
@@ -73,11 +74,11 @@ struct WireErrorInner {
 
 impl WireErrorInner {
     fn as_wire_error(&self) -> &WireError {
-        unsafe { std::mem::transmute(self) }
+        unsafe { transmute(self) }
     }
 
     fn into_wire_error(self) -> WireError {
-        unsafe { std::mem::transmute(self) }
+        unsafe { transmute(self) }
     }
 }
 
