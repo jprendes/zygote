@@ -7,7 +7,7 @@ use withfd::{WithFd, WithFdExt};
 
 use crate::codec::Codec;
 use crate::error::Error;
-use crate::fds::swap_fds;
+use crate::fd::swap_fds;
 
 pub struct Pipe(pub(crate) WithFd<UnixStream>, pub(crate) RawFd);
 

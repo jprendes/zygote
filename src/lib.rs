@@ -1,9 +1,9 @@
 //! `zygote` is a library to create zygote processes on linux.
 //! A zygote process is a small process used primarily to create new processes,
 //! but can be used for anything that requires running things in a separate process.
-//! 
+//!
 //! To learn more about zygote processes check out [these notes on Chromium](https://neugierig.org/software/chromium/notes/2011/08/zygote.html).
-//! 
+//!
 //! # Getting started
 //! ```rust
 //! # use zygote::Zygote;
@@ -24,15 +24,13 @@ use anyhow::Error as AnyhowError;
 use clone3::Clone3;
 use codec::{AsCodecRef, Codec};
 use error::{Error, WireError};
-use fds::SendableFd;
+use fd::SendableFd;
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
 
-//#[doc(hidden)]
 mod codec;
 pub mod error;
-#[doc(hidden)]
-pub mod fds;
+pub mod fd;
 mod pipe;
 
 #[cfg(feature = "anyhow")]
@@ -49,7 +47,7 @@ pub struct Zygote {
 impl Zygote {
     /// Initialize a new global zygote child process.
     /// The global zygote can be accessed using [`Zygote::global()`].
-    /// 
+    ///
     /// Calling this method multiple times does not change the result
     /// beyond the initial call.
     ///
@@ -73,7 +71,7 @@ impl Zygote {
     ///     Zygote::global();
     /// }
     /// ```
-    /// 
+    ///
     /// # Panics
     /// Same panic conditions as [`Zygote::new()`].
     pub fn init() {
@@ -86,7 +84,7 @@ impl Zygote {
     /// # use zygote::Zygote;
     /// Zygote::global().run(|_| std::process::id(), ());
     /// ```
-    /// 
+    ///
     /// # Panics
     /// If this calls initializes the global zygote, it shares the same
     /// panic conditions as [`Zygote::new()`].
@@ -96,7 +94,7 @@ impl Zygote {
     }
 
     /// Create a new child zygote process.
-    /// 
+    ///
     /// ```rust
     /// # use zygote::Zygote;
     /// # fn getppid() -> libc::pid_t { unsafe { libc::getppid() } }
@@ -105,7 +103,7 @@ impl Zygote {
     /// let ppid = zygote.run(|_| getppid(), ());
     /// assert_eq!(ppid, getpid()); // zygote is a child of the current process
     /// ```
-    /// 
+    ///
     /// The zygote process will inherit the state of the calling thread at the point
     /// it was created.
     ///
@@ -128,7 +126,7 @@ impl Zygote {
     /// has suddenly been terminated. This could leave libc in a bad state.
     /// To avoid this it is best to create the zygote while the application is still
     /// single threaded.
-    /// 
+    ///
     /// # Panics
     /// This method panics if any of the syscalls (creating a unix domain socket and
     /// cloning the process) fails.
@@ -152,7 +150,7 @@ impl Zygote {
     /// let pid = zygote.run(|_| getpid(), ());
     /// assert_ne!(pid, getpid()); // different pid
     /// ```
-    /// 
+    ///
     /// # Panics
     /// Same panic conditions as [`Zygote::new()`].
     pub fn new_sibling() -> Zygote {
@@ -209,7 +207,7 @@ impl Zygote {
     /// let x = zygote.run(|x: u32| x*2, &4); // this is also ok
     /// assert_eq!(x, 8);
     /// ```
-    /// 
+    ///
     /// # Panics
     /// This method panics if communication with the zygote fails or
     /// if the task itself panics.
@@ -267,7 +265,7 @@ impl Zygote {
     ///
     /// assert_eq!(ppid, pid); // zygote2 is a child of zygote
     /// ```
-    /// 
+    ///
     /// # Panics
     /// Same panic conditions as [`Zygote::new()`].
     pub fn spawn(&self) -> Zygote {
@@ -290,7 +288,7 @@ impl Zygote {
     ///
     /// assert_eq!(ppid, ppid2); // zygote2 and zygote share the same parent
     /// ```
-    /// 
+    ///
     /// # Panics
     /// Same panic conditions as [`Zygote::new()`].
     pub fn spawn_sibling(&self) -> Zygote {

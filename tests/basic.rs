@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::LazyLock;
 
 use zygote::error::WireError;
-use zygote::fds::SendableFd;
+use zygote::fd::SendableFd;
 use zygote::Zygote;
 
 static NAME: LazyLock<String> = LazyLock::new(|| String::from("Zygote"));
