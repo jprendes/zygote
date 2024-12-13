@@ -269,7 +269,6 @@ dependencies = [
 name = "zygote"
 version = "0.1.0"
 dependencies = [
- "byteorder",
  "libc",
  "rmp-serde",
  "serde",

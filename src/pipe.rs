@@ -1,15 +1,15 @@
-use std::io::{Read as _, Write as _};
+use std::io::{self, Read as _, Write as _};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::slice;
 
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use withfd::{WithFd, WithFdExt};
 
 use crate::codec::Codec;
 use crate::error::Error;
 use crate::fd::swap_fds;
 
-pub struct Pipe(pub(crate) WithFd<UnixStream>, pub(crate) RawFd);
+pub struct Pipe(WithFd<UnixStream>, RawFd);
 
 impl Pipe {
     pub(crate) fn new(pipe: UnixStream) -> Self {
@@ -43,6 +43,46 @@ impl AsFd for Pipe {
 }
 
 impl Pipe {
+    fn write_usize(&mut self, n: usize) -> io::Result<()> {
+        let buf = n.to_ne_bytes();
+        self.0.write_all(&buf)?;
+        Ok(())
+    }
+
+    fn read_usize(&mut self) -> io::Result<usize> {
+        let mut buf = [0u8; std::mem::size_of::<usize>()];
+        self.0.read_exact(&mut buf)?;
+        Ok(usize::from_ne_bytes(buf))
+    }
+
+    fn write_sized(&mut self, buf: &[u8]) -> io::Result<()> {
+        self.write_usize(buf.len())?;
+        self.0.write_all(buf)?;
+        Ok(())
+    }
+
+    fn read_sized(&mut self) -> io::Result<Vec<u8>> {
+        let size = self.read_usize()?;
+        let mut buf = vec![0; size];
+        self.0.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+
+    fn write_fds(&mut self, fds: &[BorrowedFd]) -> io::Result<()> {
+        self.write_usize(fds.len())?;
+        self.0.write_with_fd(&[42], &fds)?;
+        Ok(())
+    }
+
+    fn read_fds(&mut self) -> io::Result<Vec<OwnedFd>> {
+        let len = self.read_usize()?;
+        let mut byte = 0;
+        self.0.read_exact(slice::from_mut(&mut byte))?;
+        assert_eq!(byte, 42);
+        let fds = self.0.take_fds().take(len).collect();
+        Ok(fds)
+    }
+
     pub fn send<T: Codec>(&mut self, data: &T) -> Result<(), Error> {
         let n = swap_fds(vec![]).len();
         assert_eq!(n, 0);
@@ -54,26 +94,17 @@ impl Pipe {
             .map(|fd| unsafe { BorrowedFd::borrow_raw(fd) })
             .collect();
 
-        self.0.write_u64::<NativeEndian>(bytes.len() as _)?;
-        self.0.write_all(&bytes)?;
+        self.write_sized(&bytes)?;
+        self.write_fds(&fds)?;
 
-        self.0.write_u64::<NativeEndian>(fds.len() as _)?;
-        self.0.write_with_fd(&[42], &fds)?;
         Ok(())
     }
 
     pub fn recv<T: Codec>(&mut self) -> Result<T, Error> {
-        let len = self.0.read_u64::<NativeEndian>()? as usize;
-        let mut buffer = vec![0; len];
-        self.0.read_exact(&mut buffer)?;
-
-        let len = self.0.read_u64::<NativeEndian>()? as usize;
-        let byte = self.0.read_u8()?;
-        assert_eq!(byte, 42);
+        let buffer = self.read_sized()?;
         let fds = self
-            .0
-            .take_fds()
-            .take(len)
+            .read_fds()?
+            .into_iter()
             .map(|fd| fd.into_raw_fd())
             .collect();
 
@@ -91,30 +122,3 @@ impl Pipe {
         Ok(res)
     }
 }
-
-/*
-impl Codec for Pipe {
-    fn serialize(&self) -> Result<(Vec<u8>, Vec<BorrowedFd>), rmp_serde::encode::Error> {
-        Ok((vec![], vec![self.as_fd()]))
-    }
-
-    fn deserialize(
-        buf: impl AsRef<[u8]>,
-        mut fds: Vec<OwnedFd>,
-    ) -> Result<Self, rmp_serde::decode::Error> {
-        if !buf.as_ref().is_empty() {
-            return Err(rmp_serde::decode::Error::InvalidMarkerRead(
-                std::io::Error::other("expected no bytes"),
-            ));
-        }
-        if fds.len() != 1 {
-            return Err(rmp_serde::decode::Error::InvalidMarkerRead(
-                std::io::Error::other("expected only one fd"),
-            ));
-        }
-        let fd = fds.remove(0);
-        let pipe = unsafe { UnixStream::from_raw_fd(fd.into_raw_fd()) };
-        Ok(Pipe::new(pipe))
-    }
-}
-*/
