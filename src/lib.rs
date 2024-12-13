@@ -15,12 +15,11 @@
 //! ```
 
 use std::backtrace::Backtrace;
+use std::cell::Cell;
 use std::io::ErrorKind;
-use std::panic::{catch_unwind, set_hook};
+use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
-#[cfg(feature = "anyhow")]
-use anyhow::Error as AnyhowError;
 use clone3::Clone3;
 use codec::{AsCodecRef, Codec};
 use error::{Error, WireError};
@@ -32,12 +31,6 @@ mod codec;
 pub mod error;
 pub mod fd;
 mod pipe;
-
-#[cfg(feature = "anyhow")]
-type Result<T, E = AnyhowError> = std::result::Result<T, E>;
-
-#[cfg(not(feature = "anyhow"))]
-type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Serialize, Deserialize)]
 pub struct Zygote {
@@ -300,26 +293,6 @@ impl Zygote {
     }
 }
 
-// The pipe used by this zygote process.
-// We don't need a mutex as the pipe will always be accessed from one single threaded.
-static mut PIPE: Option<Pipe> = None;
-fn pipe() -> &'static mut Pipe {
-    unsafe { PIPE.as_mut().unwrap() }
-}
-
-fn runner<Args: Codec, Ret: Codec>(f: usize) -> Result<(), Error>
-where
-    Result<Ret, WireError>: Codec,
-{
-    catch_unwind(|| -> Result<(), Error> {
-        let f: fn(Args) -> Ret = unsafe { std::mem::transmute(f) };
-        let args = pipe().recv::<Args>()?;
-        pipe().send::<Result<Ret, WireError>>(&Ok(f(args)))?;
-        Ok(())
-    })
-    .unwrap_or(Ok(()))
-}
-
 fn spawner(sibling: bool) -> Zygote {
     Zygote::new_impl(sibling)
 }
@@ -330,29 +303,49 @@ fn zygote_start(pipe: Pipe) -> ! {
         Err(Error::Io(err)) if err.kind() == ErrorKind::UnexpectedEof => {
             std::process::exit(0);
         }
-        Err(error) => {
-            #[cfg(feature = "log")]
-            log::warn!("zygote exited with error: {error:?}");
-            drop(error); // silence warning if log feature is disabled
+        Err(_) => {
             std::process::exit(1);
         }
     }
 }
 
-fn zygote_main(p: Pipe) -> Result<(), Error> {
-    unsafe { PIPE = Some(p) };
+thread_local! {
+    static PANIC_ERROR: Cell<Option<WireError>> = Cell::new(None);
+}
 
-    set_hook(Box::new(|info| {
+fn set_panic(error: WireError) {
+    PANIC_ERROR.set(Some(error));
+}
+
+fn take_panic() -> WireError {
+    PANIC_ERROR
+        .take()
+        .unwrap_or_else(|| WireError::from_str("panic information not found"))
+}
+
+fn zygote_main(mut pipe: Pipe) -> Result<(), Error> {
+    let panic_hook = take_hook();
+    set_hook(Box::new(move |info| {
         let backtrace = Backtrace::capture();
         let error = WireError::from_panic(info, &backtrace);
-        #[cfg(feature = "log")]
-        log::warn!("zygote task panic: {error:?}");
-        let _ = pipe().send::<Result<(), WireError>>(&Err(error));
+        set_panic(error);
+        panic_hook(info);
     }));
 
     loop {
-        let [f, runner] = pipe().recv::<[usize; 2]>()?;
-        let runner: fn(usize) -> Result<(), Error> = unsafe { std::mem::transmute(runner) };
-        runner(f)?;
+        let [f, runner] = pipe.recv::<[usize; 2]>()?;
+        let runner: fn(&mut Pipe, usize) -> Result<(), Error> = unsafe { std::mem::transmute(runner) };
+        runner(&mut pipe, f)?;
     }
+}
+
+fn runner<Args: Codec, Ret: Codec>(pipe: &mut Pipe, f: usize) -> Result<(), Error>
+where
+    Result<Ret, WireError>: Codec,
+{
+    let f: fn(Args) -> Ret = unsafe { std::mem::transmute(f) };
+    let args = pipe.recv::<Args>()?;
+    let res = catch_unwind(|| f(args)).map_err(|_| take_panic());
+    pipe.send(&res)?;
+    Ok(())
 }

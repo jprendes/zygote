@@ -10,12 +10,5 @@ byteorder = "1"
 rmp-serde = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
-anyhow = { version = "1", optional = true }
-log = { version = "0.4", optional = true }
 thiserror = "2"
 withfd = "0.2"
-
-[features]
-default = [ "anyhow" ]
-anyhow = [ "dep:anyhow" ]
-log = [ "dep:log" ]

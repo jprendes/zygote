@@ -4,8 +4,6 @@ use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
 use std::ops::{Deref, DerefMut};
 use std::panic::PanicHookInfo;
 
-#[cfg(feature = "anyhow")]
-use anyhow::Error as AnyhowError;
 use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
@@ -23,11 +21,11 @@ pub enum Error {
     Wire(#[from] WireError),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 #[repr(transparent)]
 pub struct WireError(WireErrorInner);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct WireErrorInner {
     pub(crate) description: String,
     pub(crate) source: Option<Box<WireErrorInner>>,
@@ -59,10 +57,19 @@ impl WireError {
 }
 
 impl WireError {
-    pub(crate) fn new(err: &(impl StdError + ?Sized)) -> Self {
+    pub(crate) fn from_str(err: impl AsRef<str>) -> Self {
+        WireErrorInner {
+            description: err.as_ref().to_owned(),
+            source: None,
+            backtrace: None,
+        }
+        .into_wire_error()
+    }
+
+    pub(crate) fn from_err(err: &(impl StdError + ?Sized)) -> Self {
         WireErrorInner {
             description: err.to_string(),
-            source: err.source().map(|src| Box::new(Self::new(src).0)),
+            source: err.source().map(|src| Box::new(Self::from_err(src).0)),
             backtrace: None,
         }
         .into_wire_error()
@@ -105,18 +112,27 @@ impl DerefMut for WireError {
     }
 }
 
-#[cfg(not(feature = "anyhow"))]
 impl<E: StdError> From<E> for WireError {
     fn from(err: E) -> Self {
-        Self::new(&err)
+        Self::from_err(&err)
     }
 }
 
-#[cfg(feature = "anyhow")]
-impl<E: Into<AnyhowError>> From<E> for WireError {
-    fn from(err: E) -> Self {
-        let err = err.into();
-        Self::new(AsRef::<dyn StdError>::as_ref(&err))
+impl From<WireError> for Box<dyn StdError + 'static> {
+    fn from(value: WireError) -> Self {
+        Box::new(value.0)
+    }
+}
+
+impl From<WireError> for Box<dyn StdError + Send + 'static> {
+    fn from(value: WireError) -> Self {
+        Box::new(value.0)
+    }
+}
+
+impl From<WireError> for Box<dyn StdError + Send + Sync + 'static> {
+    fn from(value: WireError) -> Self {
+        Box::new(value.0)
     }
 }
 
