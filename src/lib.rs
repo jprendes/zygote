@@ -16,14 +16,15 @@
 
 use std::backtrace::Backtrace;
 use std::cell::Cell;
-use std::io::ErrorKind;
+use std::io;
+use std::io::ErrorKind::UnexpectedEof;
 use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
-use clone3::Clone3;
 use codec::{AsCodecRef, Codec};
 use error::{Error, WireError};
 use fd::SendableFd;
+use libc::{pid_t, CLONE_PARENT, SIGCHLD};
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
 
@@ -152,19 +153,18 @@ impl Zygote {
 
     fn new_impl(sibling: bool) -> Zygote {
         let (child_pipe, parent_pipe) = Pipe::pair().unwrap();
-        let mut clone3 = Clone3::default();
-        if sibling {
-            clone3.flag_parent();
+        let pid = if sibling {
+            clone3(CLONE_PARENT as _, 0).unwrap()
         } else {
-            clone3.exit_signal(libc::SIGCHLD as _);
-        }
-        match unsafe { clone3.call() }.unwrap() {
-            0 => {
+            clone3(0, SIGCHLD as _).unwrap()
+        };
+        match pid {
+            None => {
                 drop(parent_pipe);
                 zygote_start(child_pipe);
                 // unreachable
             }
-            _child_pid => {
+            Some(_child_pid) => {
                 drop(child_pipe);
                 let pipe = Mutex::new(SendableFd::from(parent_pipe));
                 return Self { pipe };
@@ -294,6 +294,18 @@ impl Zygote {
     }
 }
 
+fn clone3(flags: u64, exit_signal: u64) -> io::Result<Option<pid_t>> {
+    let mut args = [flags, 0, 0, 0, exit_signal, 0, 0, 0, 0, 0, 0];
+    let args_ptr = std::ptr::from_mut(&mut args);
+    let args_size = std::mem::size_of_val(&args);
+    match unsafe { libc::syscall(libc::SYS_clone3, args_ptr, args_size) } {
+        0 => Ok(None),
+        pid @ 1.. => Ok(Some(pid as pid_t)),
+        -1 => Err(io::Error::last_os_error()),
+        _ => Err(io::Error::other("unknown")),
+    }
+}
+
 fn spawner(sibling: bool) -> Zygote {
     Zygote::new_impl(sibling)
 }
@@ -301,7 +313,7 @@ fn spawner(sibling: bool) -> Zygote {
 fn zygote_start(pipe: Pipe) -> ! {
     match zygote_main(pipe) {
         Ok(()) => std::process::exit(0),
-        Err(Error::Io(err)) if err.kind() == ErrorKind::UnexpectedEof => {
+        Err(Error::Io(err)) if err.kind() == UnexpectedEof => {
             std::process::exit(0);
         }
         Err(_) => {
