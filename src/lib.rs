@@ -186,8 +186,9 @@ impl Zygote {
     ///
     /// The argument type `Args` and the return type `Ret` must both be serializable
     /// (and deserializable) with [serde].
-    /// If you want to run a fallible function that returns a [`Result`](core::result::Result)
-    /// consider using [`WireError`] as the error type, which is serializable.
+    /// If you want to run a fallible function that returns a [`Result`] consider using
+    /// [`WireError`] as the error type, which is serializable.
+    /// If you want to pass a file descriptor, consider using [`SendableFd`].
     ///
     /// The arguments can be moved or passed by reference. This means this method accepts
     /// either `Args` or `&Args`.
@@ -214,8 +215,8 @@ impl Zygote {
     }
 
     /// Run a task in the zygote process.
-    /// Like [`Zygote::run()`], but the return value is a [`Result`](core::result::Result)
-    /// that will error if the task panics or communication with the zygote fails.
+    /// Like [`Zygote::run()`], but the return value is a [`Result`] that will
+    /// error if the task panics or communication with the zygote fails.
     /// ```rust
     /// # use zygote::Zygote;
     /// # let zygote = Zygote::new();
@@ -334,7 +335,8 @@ fn zygote_main(mut pipe: Pipe) -> Result<(), Error> {
 
     loop {
         let [f, runner] = pipe.recv::<[usize; 2]>()?;
-        let runner: fn(&mut Pipe, usize) -> Result<(), Error> = unsafe { std::mem::transmute(runner) };
+        let runner: fn(&mut Pipe, usize) -> Result<(), Error> =
+            unsafe { std::mem::transmute(runner) };
         runner(&mut pipe, f)?;
     }
 }

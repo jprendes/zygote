@@ -6,21 +6,27 @@ use std::panic::PanicHookInfo;
 
 use serde::{Deserialize, Serialize};
 
+/// Error type used by [`Zygote::try_run()`](crate::Zygote::try_run) when running a task.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    /// Error during an IO operation
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Error deserializing the task result
     #[error("decode error: {0}")]
     Decode(#[from] rmp_serde::decode::Error),
 
+    /// Error serializing the task arguments
     #[error("encode error: {0}")]
     Encode(#[from] rmp_serde::encode::Error),
 
+    /// Error originating in the zygote process, including task panics.
     #[error("wire error: {0}")]
     Wire(#[from] WireError),
 }
 
+/// A serializable error type
 #[derive(Serialize, Deserialize, Clone)]
 #[repr(transparent)]
 pub struct WireError(WireErrorInner);
@@ -43,14 +49,17 @@ impl WireErrorInner {
 }
 
 impl WireError {
+    /// Returns the lower-level source of this error, if any.
     pub fn source(&self) -> Option<&WireError> {
         self.0.source.as_ref().map(|s| s.as_wire_error())
     }
 
+    /// Get the description of this error.
     pub fn description(&self) -> &str {
         &self.0.description
     }
 
+    /// Get the backtrace for this error, if any.
     pub fn backtrace(&self) -> Option<&str> {
         self.0.backtrace.as_ref().map(|s| s.as_str())
     }

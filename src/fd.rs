@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 
@@ -8,6 +9,39 @@ thread_local! {
     static FDS: RefCell<Vec<Option<RawFd>>> = RefCell::default();
 }
 
+/// Wrapper type that allows sending file descriptors to and from the zygote.
+///
+/// The wrapped type must implement the [`AsFd`] and [`FromRawFd`] traits.
+///
+/// ```rust
+/// # use std::os::unix::net::UnixStream;
+/// # use std::net::Shutdown;
+/// # use std::io::{Write, Read, BufReader, BufRead as _, read_to_string};
+/// # use std::ops::DerefMut;
+/// # use zygote::Zygote;
+/// # use zygote::fd::SendableFd;
+/// #[derive(serde::Serialize, serde::Deserialize)]
+/// struct WriteArgs {
+///     writer: SendableFd<UnixStream>,
+///     content: String,
+/// }
+///
+/// let (writer, mut reader) = UnixStream::pair().unwrap();
+///
+/// let args = WriteArgs {
+///     writer: writer.into(),
+///     content: "hello world!".into(),
+/// };
+///
+/// Zygote::global().run(|mut args| {
+///     write!(args.writer, "{}", args.content).unwrap();
+///     args.writer.shutdown(Shutdown::Both).unwrap();
+/// }, args);
+///
+/// let content = read_to_string(reader).unwrap();
+///
+/// assert_eq!(content, "hello world!");
+/// ```
 pub struct SendableFd<T>(T);
 
 impl<T> From<T> for SendableFd<T> {
@@ -81,6 +115,30 @@ impl<'a, T: FromRawFd> Deserialize<'a> for SendableFd<T> {
         let n = Deserialize::deserialize(deserializer)?;
         let fd = take_fd(n).expect("expected an FD");
         Ok(Self(unsafe { T::from_raw_fd(fd.into_raw_fd()) }))
+    }
+}
+
+impl<T: Write> Write for SendableFd<T> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+
+    fn write_vectored(&mut self, bufs: &[std::io::IoSlice<'_>]) -> std::io::Result<usize> {
+        self.0.write_vectored(bufs)
+    }
+}
+
+impl<T: Read> Read for SendableFd<T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [std::io::IoSliceMut<'_>]) -> std::io::Result<usize> {
+        self.0.read_vectored(bufs)
     }
 }
 
