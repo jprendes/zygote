@@ -95,7 +95,7 @@ impl WireError {
 
     /// Get the backtrace for this error, if any.
     pub fn backtrace(&self) -> Option<&str> {
-        self.0.backtrace.as_ref().map(|s| s.as_str())
+        self.0.backtrace.as_deref()
     }
 }
 

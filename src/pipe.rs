@@ -71,7 +71,7 @@ impl Pipe {
 
     fn write_fds(&mut self, fds: &[BorrowedFd]) -> io::Result<()> {
         self.write_usize(fds.len())?;
-        self.0.write_with_fd(&[42], &fds)?;
+        self.0.write_with_fd(&[42], fds)?;
         Ok(())
     }
 
@@ -104,7 +104,7 @@ impl Pipe {
         let fds = self.read_fds()?;
 
         // safety: OwnedFd is repr(transparent) over RawFd
-        let fds = unsafe { transmute(fds) };
+        let fds: Vec<RawFd> = unsafe { transmute(fds) };
 
         let n = swap_fds(fds).len();
         assert_eq!(n, 0);

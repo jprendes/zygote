@@ -85,7 +85,7 @@ impl Zygote {
     /// panic conditions as [`Zygote::new()`].
     pub fn global() -> &'static Zygote {
         static ZYGOTE: LazyLock<Zygote> = LazyLock::new(Zygote::new);
-        &*ZYGOTE
+        &ZYGOTE
     }
 
     /// Create a new child zygote process.
@@ -168,7 +168,7 @@ impl Zygote {
             Some(_child_pid) => {
                 drop(child_pipe);
                 let pipe = Mutex::new(SendableFd::from(parent_pipe));
-                return Self { pipe };
+                Self { pipe }
             }
         }
     }
@@ -291,7 +291,13 @@ impl Zygote {
     }
 
     fn spawn_impl(&self, sibling: bool) -> Result<Zygote, Error> {
-        self.try_run(spawner, &sibling)
+        self.try_run(spawner, sibling)
+    }
+}
+
+impl Default for Zygote {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -324,7 +330,7 @@ fn zygote_start(pipe: Pipe) -> ! {
 }
 
 thread_local! {
-    static PANIC_ERROR: Cell<Option<WireError>> = Cell::new(None);
+    static PANIC_ERROR: Cell<Option<WireError>> = const { Cell::new(None) };
 }
 
 fn set_panic(error: WireError) {

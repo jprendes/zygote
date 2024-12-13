@@ -19,21 +19,21 @@ pub trait Codec: Serialize + for<'a> Deserialize<'a> + UnwindSafe + sealed::Code
 impl<T: Serialize + for<'a> Deserialize<'a>> sealed::Codec for T {}
 impl<T: Serialize + for<'a> Deserialize<'a> + UnwindSafe + sealed::Codec> Codec for T {}
 
-pub trait AsCodecRef<T: Codec + ?Sized>: sealed::AsCodecRef<T> {
+pub trait AsCodecRef<T: Codec>: sealed::AsCodecRef<T> {
     fn as_codec_ref(&self) -> &T;
 }
 
-impl<T: Codec + ?Sized> sealed::AsCodecRef<T> for T {}
+impl<T: Codec> sealed::AsCodecRef<T> for T {}
 
-impl<T: Codec + ?Sized + sealed::AsCodecRef<T>> AsCodecRef<T> for T {
+impl<T: Codec + sealed::AsCodecRef<T>> AsCodecRef<T> for T {
     fn as_codec_ref(&self) -> &T {
         self
     }
 }
 
-impl<T: Codec + ?Sized> sealed::AsCodecRef<T> for &T {}
+impl<T: Codec> sealed::AsCodecRef<T> for &T {}
 
-impl<'a, T: Codec + ?Sized> AsCodecRef<T> for &'a T
+impl<'a, T: Codec> AsCodecRef<T> for &'a T
 where
     &'a T: sealed::AsCodecRef<T>,
 {
