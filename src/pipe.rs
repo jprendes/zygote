@@ -1,22 +1,21 @@
 use std::io::{self, Read as _, Write as _};
 use std::mem::transmute;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
-use std::os::unix::net::UnixStream;
 use std::slice;
 
-use withfd::{WithFd, WithFdExt};
+use withfd::{UnixStream, SCM_MAX_FD};
 
-use crate::codec::Codec;
+use crate::wire::{Wire, AsWire};
 use crate::error::Error;
 use crate::fd::swap_fds;
 
-pub struct Pipe(WithFd<UnixStream>, RawFd);
+mod withfd;
+
+pub struct Pipe(UnixStream);
 
 impl Pipe {
     pub(crate) fn new(pipe: UnixStream) -> Self {
-        let fd = pipe.as_raw_fd();
-        let pipe = pipe.with_fd();
-        Pipe(pipe, fd)
+        Pipe(pipe)
     }
 
     pub fn pair() -> std::io::Result<(Pipe, Pipe)> {
@@ -27,7 +26,7 @@ impl Pipe {
 
 impl AsRawFd for Pipe {
     fn as_raw_fd(&self) -> RawFd {
-        self.1
+        self.0.as_raw_fd()
     }
 }
 
@@ -39,15 +38,14 @@ impl FromRawFd for Pipe {
 
 impl AsFd for Pipe {
     fn as_fd(&self) -> BorrowedFd<'_> {
-        unsafe { BorrowedFd::borrow_raw(self.1) }
+        self.0.as_fd()
+        //unsafe { BorrowedFd::borrow_raw(self.1) }
     }
 }
 
 impl Pipe {
     fn write_usize(&mut self, n: usize) -> io::Result<()> {
-        let buf = n.to_ne_bytes();
-        self.0.write_all(&buf)?;
-        Ok(())
+        self.0.write_all(&n.to_ne_bytes())
     }
 
     fn read_usize(&mut self) -> io::Result<usize> {
@@ -58,8 +56,7 @@ impl Pipe {
 
     fn write_sized(&mut self, buf: &[u8]) -> io::Result<()> {
         self.write_usize(buf.len())?;
-        self.0.write_all(buf)?;
-        Ok(())
+        self.0.write_all(buf)
     }
 
     fn read_sized(&mut self) -> io::Result<Vec<u8>> {
@@ -69,26 +66,32 @@ impl Pipe {
         Ok(buf)
     }
 
-    fn write_fds(&mut self, fds: &[BorrowedFd]) -> io::Result<()> {
-        self.write_usize(fds.len())?;
-        self.0.write_with_fd(&[42], fds)?;
+    fn write_fds(&mut self, mut fds: &[BorrowedFd]) -> io::Result<()> {
+        while fds.len() > SCM_MAX_FD {
+            self.0.write_with_fd(&[255], &fds[..SCM_MAX_FD])?;
+            fds = &fds[SCM_MAX_FD..];
+        }
+        self.0.write_with_fd(&[fds.len() as u8], fds)?;
         Ok(())
     }
 
     fn read_fds(&mut self) -> io::Result<Vec<OwnedFd>> {
-        let len = self.read_usize()?;
-        let mut byte = 0;
-        self.0.read_exact(slice::from_mut(&mut byte))?;
-        assert_eq!(byte, 42);
-        let fds = self.0.take_fds().take(len).collect();
+        let mut len = 0usize;
+        let mut byte = 255;
+        while byte == 255 {
+            self.0.read_exact(slice::from_mut(&mut byte))?;
+            len += (byte as usize).min(SCM_MAX_FD);
+        }
+        let fds = self.0.take_fds();
+        assert_eq!(fds.len(), len);
         Ok(fds)
     }
 
-    pub fn send<T: Codec>(&mut self, data: &T) -> Result<(), Error> {
+    pub fn send<'a, T: Wire>(&mut self, data: impl AsWire<T>) -> Result<(), Error> {
         let n = swap_fds(vec![]).len();
         assert_eq!(n, 0);
 
-        let bytes = Codec::serialize(data)?;
+        let bytes = data.serialize()?;
 
         // safety: BorrowedFd is repr(transparent) over RawFd
         let fds: Vec<BorrowedFd<'_>> = unsafe { transmute(swap_fds(vec![])) };
@@ -99,8 +102,8 @@ impl Pipe {
         Ok(())
     }
 
-    pub fn recv<T: Codec>(&mut self) -> Result<T, Error> {
-        let buffer = self.read_sized()?;
+    pub fn recv_into<'de, T: Wire>(&mut self, buffer: &'de mut Vec<u8>) -> Result<T, Error> {
+        *buffer = self.read_sized()?;
         let fds = self.read_fds()?;
 
         // safety: OwnedFd is repr(transparent) over RawFd
@@ -109,12 +112,17 @@ impl Pipe {
         let n = swap_fds(fds).len();
         assert_eq!(n, 0);
 
-        let res = Codec::deserialize(&buffer)?;
+        let res = <T as Wire>::deserialize(buffer)?;
 
         // safety: OwnedFd is repr(transparent) over RawFd
         let fds: Vec<OwnedFd> = unsafe { transmute(swap_fds(vec![])) };
         assert_eq!(fds.len(), 0);
 
         Ok(res)
+    }
+
+    pub fn recv<T: Wire>(&mut self) -> Result<T, Error> {
+        let mut buffer = Vec::default();
+        self.recv_into(&mut buffer)
     }
 }

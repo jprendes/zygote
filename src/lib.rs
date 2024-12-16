@@ -22,14 +22,14 @@ use std::mem::transmute;
 use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
-use codec::{AsCodecRef, Codec};
+use wire::{Wire, AsWire};
 use error::{Error, WireError};
 use fd::SendableFd;
 use libc::{pid_t, CLONE_PARENT, SIGCHLD};
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
 
-mod codec;
+mod wire;
 pub mod error;
 pub mod fd;
 mod pipe;
@@ -207,10 +207,10 @@ impl Zygote {
     /// This method panics if communication with the zygote fails or
     /// if the task itself panics.
     /// For a non panicing version of this method see [`Zygote::try_run()`].
-    pub fn run<Args: Codec, Ret: Codec>(
+    pub fn run<'a, Args: Wire, Ret: Wire>(
         &self,
         f: fn(Args) -> Ret,
-        args: impl AsCodecRef<Args>,
+        args: impl AsWire<Args>,
     ) -> Ret {
         self.try_run(f, args).unwrap()
     }
@@ -227,16 +227,16 @@ impl Zygote {
     /// let res = zygote.try_run(|_| panic!("oops"), ()).unwrap_err();
     /// assert!(res.to_string().contains("oops"));
     /// ```
-    pub fn try_run<Args: Codec, Ret: Codec>(
+    pub fn try_run<'a, Args: Wire, Ret: for<'b> Wire>(
         &self,
         f: fn(Args) -> Ret,
-        args: impl AsCodecRef<Args>,
+        args: impl AsWire<Args>,
     ) -> Result<Ret, Error> {
         let mut pipe = self.pipe.lock().unwrap();
         let runner = runner::<Args, Ret> as usize;
         let f = f as usize;
-        pipe.send(&[f, runner])?;
-        pipe.send(args.as_codec_ref())?;
+        pipe.send([f, runner])?;
+        pipe.send(args)?;
         Ok(pipe.recv::<Result<_, WireError>>()??)
     }
 
@@ -359,13 +359,13 @@ fn zygote_main(mut pipe: Pipe) -> Result<(), Error> {
     }
 }
 
-fn runner<Args: Codec, Ret: Codec>(pipe: &mut Pipe, f: usize) -> Result<(), Error>
+fn runner<Args: Wire, Ret: Wire>(pipe: &mut Pipe, f: usize) -> Result<(), Error>
 where
-    Result<Ret, WireError>: Codec,
+    Result<Ret, WireError>: Wire,
 {
     let f: fn(Args) -> Ret = unsafe { transmute(f) };
     let args = pipe.recv::<Args>()?;
     let res = catch_unwind(|| f(args)).map_err(|_| take_panic());
-    pipe.send(&res)?;
+    pipe.send(res)?;
     Ok(())
 }
