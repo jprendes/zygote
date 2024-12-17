@@ -1,6 +1,6 @@
 use std::io;
 use std::mem::transmute;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream as StdUnixStream;
 
 use nix::sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags};
@@ -89,20 +89,14 @@ impl io::Write for UnixStream {
     }
 }
 
-impl AsRawFd for UnixStream {
-    fn as_raw_fd(&self) -> RawFd {
-        self.inner.as_raw_fd()
-    }
-}
-
 impl AsFd for UnixStream {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.inner.as_fd()
     }
 }
 
-impl FromRawFd for UnixStream {
-    unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        Self::new(StdUnixStream::from_raw_fd(fd))
+impl From<OwnedFd> for UnixStream {
+    fn from(fd: OwnedFd) -> Self {
+        Self::new(fd.into())
     }
 }

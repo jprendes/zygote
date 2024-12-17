@@ -42,17 +42,12 @@ thread_local! {
 ///
 /// assert_eq!(content, "hello world!");
 /// ```
+#[repr(transparent)]
 pub struct WireFd<T>(T);
 
-impl<T> From<T> for WireFd<T> {
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
-
 impl<T> WireFd<T> {
-    pub fn new(val: T) -> WireFd<T> {
-        val.into()
+    pub fn new(inner: T) -> WireFd<T> {
+        Self(inner)
     }
 
     pub fn into_inner(self) -> T {
@@ -80,7 +75,13 @@ impl<T: IntoRawFd> IntoRawFd for WireFd<T> {
 
 impl<T: FromRawFd> FromRawFd for WireFd<T> {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        T::from_raw_fd(fd).into()
+        Self::new(T::from_raw_fd(fd))
+    }
+}
+
+impl<T> From<T> for WireFd<T> {
+    fn from(val: T) -> Self {
+        Self::new(val)
     }
 }
 
@@ -107,14 +108,14 @@ impl<T: AsFd> Serialize for WireFd<T> {
     }
 }
 
-impl<'a, T: FromRawFd> Deserialize<'a> for WireFd<T> {
+impl<'a, T: From<OwnedFd>> Deserialize<'a> for WireFd<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
     {
         let n = Deserialize::deserialize(deserializer)?;
         let fd = take_fd(n).expect("expected an FD");
-        Ok(Self(unsafe { T::from_raw_fd(fd.into_raw_fd()) }))
+        Ok(Self(T::from(fd)))
     }
 }
 

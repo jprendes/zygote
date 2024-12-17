@@ -1,7 +1,7 @@
 use std::any::{type_name, TypeId};
 use std::io::{self, Read as _, Write as _};
 use std::mem::transmute;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 use std::slice;
 
 use stream::{UnixStream, SCM_MAX_FD};
@@ -12,6 +12,7 @@ use crate::wire::{AsWire, Wire};
 
 mod stream;
 
+#[repr(transparent)]
 pub struct Pipe(UnixStream);
 
 impl Pipe {
@@ -25,15 +26,9 @@ impl Pipe {
     }
 }
 
-impl AsRawFd for Pipe {
-    fn as_raw_fd(&self) -> RawFd {
-        self.0.as_raw_fd()
-    }
-}
-
-impl FromRawFd for Pipe {
-    unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        Self::new(UnixStream::from_raw_fd(fd))
+impl From<OwnedFd> for Pipe {
+    fn from(fd: OwnedFd) -> Self {
+        Self::new(fd.into())
     }
 }
 
