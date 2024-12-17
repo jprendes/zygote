@@ -1,15 +1,16 @@
+use std::any::{type_name, TypeId};
 use std::io::{self, Read as _, Write as _};
 use std::mem::transmute;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::slice;
 
-use withfd::{UnixStream, SCM_MAX_FD};
+use stream::{UnixStream, SCM_MAX_FD};
 
-use crate::wire::{Wire, AsWire};
 use crate::error::Error;
 use crate::fd::swap_fds;
+use crate::wire::{AsWire, Wire};
 
-mod withfd;
+mod stream;
 
 pub struct Pipe(UnixStream);
 
@@ -88,10 +89,13 @@ impl Pipe {
     }
 
     pub fn send<'a, T: Wire>(&mut self, data: impl AsWire<T>) -> Result<(), Error> {
-        let n = swap_fds(vec![]).len();
-        assert_eq!(n, 0);
+        let tag: [u8; size_of::<TypeId>()] = unsafe { transmute(TypeId::of::<T>()) };
+        let mut bytes: Vec<u8> = tag.into();
 
-        let bytes = data.serialize()?;
+        let n = swap_fds(vec![]).len();
+        assert_eq!(n, 0, "orphaned file descriptors in channel");
+
+        data.serialize_into(&mut bytes)?;
 
         // safety: BorrowedFd is repr(transparent) over RawFd
         let fds: Vec<BorrowedFd<'_>> = unsafe { transmute(swap_fds(vec![])) };
@@ -106,17 +110,35 @@ impl Pipe {
         *buffer = self.read_sized()?;
         let fds = self.read_fds()?;
 
+        if buffer.len() < size_of::<TypeId>() {
+            return Err(Error::Decode(rmp_serde::decode::Error::Uncategorized(
+                format!("Invalid type id for {}", type_name::<T>()),
+            )));
+        }
+
+        let mut tag = [0u8; size_of::<TypeId>()];
+        tag.clone_from_slice(&buffer[..size_of::<TypeId>()]);
+        let tag: TypeId = unsafe { transmute(tag) };
+
+        let buffer = &buffer[size_of::<TypeId>()..];
+
+        if tag != TypeId::of::<T>() {
+            return Err(Error::Decode(rmp_serde::decode::Error::Uncategorized(
+                format!("Invalid type id for {}", type_name::<T>()),
+            )));
+        }
+
         // safety: OwnedFd is repr(transparent) over RawFd
         let fds: Vec<RawFd> = unsafe { transmute(fds) };
 
         let n = swap_fds(fds).len();
-        assert_eq!(n, 0);
+        assert_eq!(n, 0, "orphaned file descriptors in channel");
 
         let res = <T as Wire>::deserialize(buffer)?;
 
         // safety: OwnedFd is repr(transparent) over RawFd
         let fds: Vec<OwnedFd> = unsafe { transmute(swap_fds(vec![])) };
-        assert_eq!(fds.len(), 0);
+        assert_eq!(fds.len(), 0, "orphaned file descriptors in channel");
 
         Ok(res)
     }
@@ -124,5 +146,20 @@ impl Pipe {
     pub fn recv<T: Wire>(&mut self) -> Result<T, Error> {
         let mut buffer = Vec::default();
         self.recv_into(&mut buffer)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Pipe;
+
+    #[test]
+    fn basic() {
+        let (mut s, mut d) = Pipe::pair().unwrap();
+
+        s.send::<String>("hello world!").unwrap();
+        let msg = d.recv::<String>().unwrap();
+
+        assert_eq!(msg, "hello world!");
     }
 }
