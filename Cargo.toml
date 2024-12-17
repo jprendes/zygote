@@ -10,3 +10,6 @@ libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 nix = { version = "0.29", features = ["socket", "uio"] }
+
+[dev-dependencies]
+nix = { version = "*", features = ["process"]}

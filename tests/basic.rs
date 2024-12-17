@@ -6,6 +6,14 @@ use zygote::error::WireError;
 use zygote::fd::SendableFd;
 use zygote::Zygote;
 
+fn getppid() -> u32 {
+    unsafe { libc::getppid() as u32 }
+}
+
+fn getpid() -> u32 {
+    unsafe { libc::getpid() as u32 }
+}
+
 fn say_hi(name: String) -> String {
     format!("hello {name}")
 }
@@ -105,14 +113,37 @@ fn wire_error() {
 
 #[test]
 fn nested_zygote() {
-    let pid = std::process::id();
-    let zyg_pid = Zygote::global().run(|_| std::process::id(), ());
+    let pid = getpid();
+    let zyg_pid = Zygote::global().run(|_| getpid(), ());
+    let zyg_ppid = Zygote::global().run(|_| getppid(), ());
 
     assert_ne!(pid, zyg_pid);
+    assert_eq!(pid, zyg_ppid);
 
     let zygote = Zygote::global().spawn();
-    let zygzyg_pid = zygote.run(|_| std::process::id(), ());
+    let zygzyg_pid = zygote.run(|_| getpid(), ());
+    let zygzyg_ppid = zygote.run(|_| getppid(), ());
 
     assert_ne!(pid, zygzyg_pid);
     assert_ne!(zyg_pid, zygzyg_pid);
+    assert_eq!(zyg_pid, zygzyg_ppid);
+}
+
+#[test]
+fn nested_sibling_zygote() {
+    let pid = getpid();
+    let zyg_pid = Zygote::global().run(|_| getpid(), ());
+    let zyg_ppid = Zygote::global().run(|_| getppid(), ());
+
+    assert_ne!(pid, zyg_pid);
+    assert_eq!(pid, zyg_ppid);
+
+    let zygote = Zygote::global().spawn_sibling();
+    let zygzyg_pid = zygote.run(|_| getpid(), ());
+    let zygzyg_ppid = zygote.run(|_| getppid(), ());
+
+    assert_ne!(pid, zygzyg_pid);
+    assert_ne!(zyg_pid, zygzyg_pid);
+    assert_eq!(zyg_ppid, zygzyg_ppid);
+    assert_eq!(pid, zygzyg_ppid);
 }

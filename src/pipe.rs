@@ -40,7 +40,6 @@ impl FromRawFd for Pipe {
 impl AsFd for Pipe {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
-        //unsafe { BorrowedFd::borrow_raw(self.1) }
     }
 }
 
@@ -161,5 +160,13 @@ mod test {
         let msg = d.recv::<String>().unwrap();
 
         assert_eq!(msg, "hello world!");
+    }
+
+    #[test]
+    fn validate_type() {
+        let (mut s, mut d) = Pipe::pair().unwrap();
+
+        s.send::<String>("hello world!").unwrap();
+        d.recv::<Vec<u8>>().unwrap_err();
     }
 }
