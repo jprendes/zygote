@@ -19,10 +19,10 @@ thread_local! {
 /// # use std::io::{Write, Read, BufReader, BufRead as _, read_to_string};
 /// # use std::ops::DerefMut;
 /// # use zygote::Zygote;
-/// # use zygote::fd::SendableFd;
+/// # use zygote::WireFd;
 /// #[derive(serde::Serialize, serde::Deserialize)]
 /// struct WriteArgs {
-///     writer: SendableFd<UnixStream>,
+///     writer: WireFd<UnixStream>,
 ///     content: String,
 /// }
 ///
@@ -42,16 +42,16 @@ thread_local! {
 ///
 /// assert_eq!(content, "hello world!");
 /// ```
-pub struct SendableFd<T>(T);
+pub struct WireFd<T>(T);
 
-impl<T> From<T> for SendableFd<T> {
+impl<T> From<T> for WireFd<T> {
     fn from(value: T) -> Self {
         Self(value)
     }
 }
 
-impl<T> SendableFd<T> {
-    pub fn new(val: T) -> SendableFd<T> {
+impl<T> WireFd<T> {
+    pub fn new(val: T) -> WireFd<T> {
         val.into()
     }
 
@@ -60,44 +60,44 @@ impl<T> SendableFd<T> {
     }
 }
 
-impl<T: AsFd> AsRawFd for SendableFd<T> {
+impl<T: AsFd> AsRawFd for WireFd<T> {
     fn as_raw_fd(&self) -> RawFd {
         self.0.as_fd().as_raw_fd()
     }
 }
 
-impl<T: AsFd> AsFd for SendableFd<T> {
+impl<T: AsFd> AsFd for WireFd<T> {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.0.as_fd()
     }
 }
 
-impl<T: IntoRawFd> IntoRawFd for SendableFd<T> {
+impl<T: IntoRawFd> IntoRawFd for WireFd<T> {
     fn into_raw_fd(self) -> RawFd {
         self.0.into_raw_fd()
     }
 }
 
-impl<T: FromRawFd> FromRawFd for SendableFd<T> {
+impl<T: FromRawFd> FromRawFd for WireFd<T> {
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
         T::from_raw_fd(fd).into()
     }
 }
 
-impl<T> Deref for SendableFd<T> {
+impl<T> Deref for WireFd<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl<T> DerefMut for SendableFd<T> {
+impl<T> DerefMut for WireFd<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<T: AsFd> Serialize for SendableFd<T> {
+impl<T: AsFd> Serialize for WireFd<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -107,7 +107,7 @@ impl<T: AsFd> Serialize for SendableFd<T> {
     }
 }
 
-impl<'a, T: FromRawFd> Deserialize<'a> for SendableFd<T> {
+impl<'a, T: FromRawFd> Deserialize<'a> for WireFd<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'a>,
@@ -118,7 +118,7 @@ impl<'a, T: FromRawFd> Deserialize<'a> for SendableFd<T> {
     }
 }
 
-impl<T: Write> Write for SendableFd<T> {
+impl<T: Write> Write for WireFd<T> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.0.write(buf)
     }
@@ -132,7 +132,7 @@ impl<T: Write> Write for SendableFd<T> {
     }
 }
 
-impl<T: Read> Read for SendableFd<T> {
+impl<T: Read> Read for WireFd<T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.0.read(buf)
     }

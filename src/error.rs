@@ -52,7 +52,7 @@ pub enum Error {
 /// ```rust
 /// # use std::fs;
 /// # use zygote::Zygote;
-/// # use zygote::error::WireError;
+/// # use zygote::WireError;
 /// Zygote::global().run(|_| -> Result<String, WireError> {
 ///     let msg = fs::read_to_string("message.txt")?;
 ///     Ok(msg)

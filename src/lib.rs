@@ -22,21 +22,22 @@ use std::mem::transmute;
 use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
-use wire::{Wire, AsWire};
-use error::{Error, WireError};
-use fd::SendableFd;
+pub use error::{Error, WireError};
+pub use fd::WireFd;
 use libc::{pid_t, CLONE_PARENT, SIGCHLD};
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
+use wire::{AsWire, Wire};
 
-mod wire;
-pub mod error;
-pub mod fd;
+mod error;
+mod fd;
 mod pipe;
+mod wire;
 
+///
 #[derive(Serialize, Deserialize)]
 pub struct Zygote {
-    pipe: Mutex<SendableFd<Pipe>>,
+    pipe: Mutex<WireFd<Pipe>>,
 }
 
 impl Zygote {
@@ -167,7 +168,7 @@ impl Zygote {
             }
             Some(_child_pid) => {
                 drop(child_pipe);
-                let pipe = Mutex::new(SendableFd::from(parent_pipe));
+                let pipe = Mutex::new(WireFd::from(parent_pipe));
                 Self { pipe }
             }
         }
@@ -189,7 +190,7 @@ impl Zygote {
     /// (and deserializable) with [serde].
     /// If you want to run a fallible function that returns a [`Result`] consider using
     /// [`WireError`] as the error type, which is serializable.
-    /// If you want to pass a file descriptor, consider using [`SendableFd`].
+    /// If you want to pass a file descriptor, consider using [`WireFd`].
     ///
     /// The arguments can be moved or passed by reference. This means this method accepts
     /// either `Args` or `&Args`.

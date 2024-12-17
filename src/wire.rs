@@ -14,7 +14,7 @@ pub trait Wire: Serialize + DeserializeOwned + Any + UnwindSafe {
         Ok(buf)
     }
     fn serialize_into(&self, buf: &mut Vec<u8>) -> Result<(), rmp_serde::encode::Error> {
-        rmp_serde::encode::write_named(buf,self)
+        rmp_serde::encode::write_named(buf, self)
     }
 }
 
@@ -46,12 +46,12 @@ impl<T: Wire> AsWire<T> for &T {
 
 impl AsWire<String> for str {
     fn serialize_into(&self, buf: &mut Vec<u8>) -> Result<(), rmp_serde::encode::Error> {
-        rmp_serde::encode::write_named(buf,self)
+        rmp_serde::encode::write_named(buf, self)
     }
 }
 
 impl AsWire<String> for &str {
     fn serialize_into(&self, buf: &mut Vec<u8>) -> Result<(), rmp_serde::encode::Error> {
-        rmp_serde::encode::write_named(buf,self)
+        rmp_serde::encode::write_named(buf, self)
     }
 }

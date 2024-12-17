@@ -2,9 +2,7 @@ use std::io::{read_to_string, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 
-use zygote::error::WireError;
-use zygote::fd::SendableFd;
-use zygote::Zygote;
+use zygote::{WireError, WireFd, Zygote};
 
 fn getppid() -> u32 {
     unsafe { libc::getppid() as u32 }
@@ -27,7 +25,7 @@ fn does_error(_: ()) -> Result<(), WireError> {
     Ok(())
 }
 
-fn write_to_pipes(pipes: Vec<SendableFd<UnixStream>>) {
+fn write_to_pipes(pipes: Vec<WireFd<UnixStream>>) {
     for (i, mut pipe) in pipes.into_iter().enumerate() {
         write!(pipe, "hello world {i}!").unwrap();
         pipe.shutdown(Shutdown::Both).unwrap();
@@ -66,7 +64,7 @@ fn large_payload() {
 #[test]
 fn send_fd() {
     let (p1, p2) = UnixStream::pair().unwrap();
-    Zygote::global().run(write_to_pipes, vec![SendableFd::from(p1)]);
+    Zygote::global().run(write_to_pipes, vec![WireFd::from(p1)]);
     let msg = read_to_string(p2).unwrap();
     assert_eq!(msg, "hello world 0!");
 }
@@ -78,7 +76,7 @@ fn send_many_fd() {
     let mut p2 = vec![];
     for _ in 0..100 {
         let (pp1, pp2) = UnixStream::pair().unwrap();
-        p1.push(SendableFd::from(pp1));
+        p1.push(WireFd::from(pp1));
         p2.push(pp2);
     }
     Zygote::global().run(write_to_pipes, p1);
@@ -95,7 +93,7 @@ fn send_too_many_fd() {
     let mut p2 = vec![];
     for _ in 0..300 {
         let (pp1, pp2) = UnixStream::pair().unwrap();
-        p1.push(SendableFd::from(pp1));
+        p1.push(WireFd::from(pp1));
         p2.push(pp2);
     }
     Zygote::global().run(write_to_pipes, p1);
