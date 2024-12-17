@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 readme = "README.md"
+description = "A zygote process is a small process used primarily to create new processes."
 repository = "https://github.com/jprendes/zygote"
 homepage = "https://github.com/jprendes/zygote"
 
@@ -15,4 +16,4 @@ thiserror = "2"
 nix = { version = "0.29", features = ["socket", "uio", "signal"] }
 
 [dev-dependencies]
-nix = { version = "*", features = ["process"]}
+nix = { version = "0.29", features = ["process"]}
