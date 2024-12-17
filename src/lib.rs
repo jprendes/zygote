@@ -199,18 +199,12 @@ impl Zygote {
     /// This method panics if communication with the zygote fails or
     /// if the task itself panics.
     /// For a non panicing version of this method see [`Zygote::try_run()`].
-    pub fn run<'a, Args: Wire, Ret: Wire>(
+    pub fn run<Args: Wire, Ret: Wire>(
         &self,
         f: fn(Args) -> Ret,
         args: impl AsWire<Args>,
     ) -> Ret {
-        match self.try_run(f, args) {
-            Ok(val) => val,
-            Err(err) => {
-                println!("error in zygote: {err:?}");
-                Err(err).unwrap()
-            }
-        }
+        self.try_run(f, args).unwrap()
     }
 
     /// Run a task in the zygote process.
@@ -225,7 +219,7 @@ impl Zygote {
     /// let res = zygote.try_run(|_| panic!("oops"), ()).unwrap_err();
     /// assert!(res.to_string().contains("oops"));
     /// ```
-    pub fn try_run<'a, Args: Wire, Ret: for<'b> Wire>(
+    pub fn try_run<Args: Wire, Ret: for<'b> Wire>(
         &self,
         f: fn(Args) -> Ret,
         args: impl AsWire<Args>,

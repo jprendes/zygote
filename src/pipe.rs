@@ -82,7 +82,7 @@ impl Pipe {
         Ok(fds)
     }
 
-    pub fn send<'a, T: Wire>(&mut self, data: impl AsWire<T>) -> Result<(), Error> {
+    pub fn send<T: Wire>(&mut self, data: impl AsWire<T>) -> Result<(), Error> {
         let tag: [u8; size_of::<TypeId>()] = unsafe { transmute(TypeId::of::<T>()) };
         let mut bytes: Vec<u8> = tag.into();
 
@@ -100,7 +100,7 @@ impl Pipe {
         Ok(())
     }
 
-    pub fn recv_into<'de, T: Wire>(&mut self, buffer: &'de mut Vec<u8>) -> Result<T, Error> {
+    pub fn recv_into<T: Wire>(&mut self, buffer: &mut Vec<u8>) -> Result<T, Error> {
         *buffer = self.read_sized()?;
         let fds = self.read_fds()?;
 
