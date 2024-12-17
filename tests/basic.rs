@@ -124,24 +124,6 @@ fn nested_zygote() {
 
     assert_ne!(pid, zygzyg_pid);
     assert_ne!(zyg_pid, zygzyg_pid);
-    assert_eq!(zyg_pid, zygzyg_ppid);
-}
-
-#[test]
-fn nested_sibling_zygote() {
-    let pid = getpid();
-    let zyg_pid = Zygote::global().run(|_| getpid(), ());
-    let zyg_ppid = Zygote::global().run(|_| getppid(), ());
-
-    assert_ne!(pid, zyg_pid);
-    assert_eq!(pid, zyg_ppid);
-
-    let zygote = Zygote::global().spawn_sibling();
-    let zygzyg_pid = zygote.run(|_| getpid(), ());
-    let zygzyg_ppid = zygote.run(|_| getppid(), ());
-
-    assert_ne!(pid, zygzyg_pid);
-    assert_ne!(zyg_pid, zygzyg_pid);
     assert_eq!(zyg_ppid, zygzyg_ppid);
     assert_eq!(pid, zygzyg_ppid);
 }

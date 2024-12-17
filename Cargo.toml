@@ -9,7 +9,7 @@ rmp-serde = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-nix = { version = "0.29", features = ["socket", "uio"] }
+nix = { version = "0.29", features = ["socket", "uio", "signal"] }
 
 [dev-dependencies]
 nix = { version = "*", features = ["process"]}

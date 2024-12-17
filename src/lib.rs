@@ -17,14 +17,16 @@
 use std::backtrace::Backtrace;
 use std::cell::Cell;
 use std::io;
-use std::io::ErrorKind::UnexpectedEof;
+use std::io::ErrorKind::{BrokenPipe, UnexpectedEof};
 use std::mem::transmute;
+use std::os::fd::{AsFd as _, AsRawFd, FromRawFd, OwnedFd};
 use std::panic::{catch_unwind, set_hook, take_hook};
 use std::sync::{LazyLock, Mutex};
 
 pub use error::{Error, WireError};
 pub use fd::WireFd;
-use libc::{pid_t, CLONE_PARENT, SIGCHLD};
+use libc::{pid_t, CLONE_PARENT, SIGCHLD, SIGKILL};
+use nix::sys::wait::{waitid, Id, WaitPidFlag};
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
 use wire::{AsWire, Wire};
@@ -34,9 +36,19 @@ mod fd;
 mod pipe;
 mod wire;
 
+/// Representation of a zygote process
 ///
+/// This structure is used to represent zygote process and to run tasks
+/// in it.
+///
+/// Dropping this struct will result in the termination of the zygote
+/// process.
+#[repr(transparent)]
+pub struct Zygote(ZygoteImpl);
+
 #[derive(Serialize, Deserialize)]
-pub struct Zygote {
+struct ZygoteImpl {
+    pidfd: WireFd<OwnedFd>,
     pipe: Mutex<WireFd<Pipe>>,
 }
 
@@ -89,7 +101,8 @@ impl Zygote {
         &ZYGOTE
     }
 
-    /// Create a new child zygote process.
+    /// Create a new zygote process. The zygote process will be a child
+    /// of the calling process.
     ///
     /// ```rust
     /// # use zygote::Zygote;
@@ -130,46 +143,24 @@ impl Zygote {
         Self::new_impl(false)
     }
 
-    /// Create a new sibling zygote process.
-    /// Like [`Zygote::new()`], but the new process will have the same parent process
-    /// as the calling process.
-    ///
-    /// ```rust
-    /// # use zygote::Zygote;
-    /// # fn getppid() -> libc::pid_t { unsafe { libc::getppid() } }
-    /// # fn getpid() -> libc::pid_t { unsafe { libc::getpid() } }
-    /// let zygote = Zygote::new_sibling();
-    ///
-    /// let ppid = zygote.run(|_| getppid(), ());
-    /// assert_eq!(ppid, getppid()); // same parent pid
-    ///
-    /// let pid = zygote.run(|_| getpid(), ());
-    /// assert_ne!(pid, getpid()); // different pid
-    /// ```
-    ///
-    /// # Panics
-    /// Same panic conditions as [`Zygote::new()`].
-    pub fn new_sibling() -> Zygote {
-        Self::new_impl(true)
-    }
-
     fn new_impl(sibling: bool) -> Zygote {
         let (child_pipe, parent_pipe) = Pipe::pair().unwrap();
-        let pid = if sibling {
+        let pidfd = if sibling {
             clone3(CLONE_PARENT as _, 0).unwrap()
         } else {
             clone3(0, SIGCHLD as _).unwrap()
         };
-        match pid {
+        match pidfd {
             None => {
                 drop(parent_pipe);
                 zygote_start(child_pipe);
                 // unreachable
             }
-            Some(_child_pid) => {
+            Some(pidfd) => {
                 drop(child_pipe);
-                let pipe = Mutex::new(WireFd::from(parent_pipe));
-                Self { pipe }
+                let pidfd = WireFd::new(pidfd);
+                let pipe = Mutex::new(WireFd::new(parent_pipe));
+                Zygote(ZygoteImpl { pidfd, pipe })
             }
         }
     }
@@ -213,7 +204,13 @@ impl Zygote {
         f: fn(Args) -> Ret,
         args: impl AsWire<Args>,
     ) -> Ret {
-        self.try_run(f, args).unwrap()
+        match self.try_run(f, args) {
+            Ok(val) => val,
+            Err(err) => {
+                println!("error in zygote: {err:?}");
+                Err(err).unwrap()
+            }
+        }
     }
 
     /// Run a task in the zygote process.
@@ -233,7 +230,7 @@ impl Zygote {
         f: fn(Args) -> Ret,
         args: impl AsWire<Args>,
     ) -> Result<Ret, Error> {
-        let mut pipe = self.pipe.lock().unwrap();
+        let mut pipe = self.0.pipe.lock().unwrap();
         let runner = runner::<Args, Ret> as usize;
         let f = f as usize;
         pipe.send([f, runner])?;
@@ -242,7 +239,8 @@ impl Zygote {
     }
 
     /// Create a new zygote process from within this zygote process.
-    /// The new zygote process will be a child of this zygote process.
+    /// The new zygote process will be a sibling of the current zygote,
+    /// i.e., they will have the same parent process.
     ///
     /// This is useful when you want to create a new zygote but the current
     /// process is not in a state where doing that would be safe.
@@ -254,32 +252,9 @@ impl Zygote {
     /// # let zygote = Zygote::new();
     /// # fn getppid() -> libc::pid_t { unsafe { libc::getppid() } }
     /// # fn getpid() -> libc::pid_t { unsafe { libc::getpid() } }
-    /// let pid = zygote.run(|_| getpid(), ());
-    ///
-    /// let zygote2 = zygote.spawn();
-    /// let ppid = zygote2.run(|_| getppid(), ());
-    ///
-    /// assert_eq!(ppid, pid); // zygote2 is a child of zygote
-    /// ```
-    ///
-    /// # Panics
-    /// Same panic conditions as [`Zygote::new()`].
-    pub fn spawn(&self) -> Zygote {
-        self.spawn_impl(false).unwrap()
-    }
-
-    /// Create a new zygote process from within this zygote process.
-    /// Like [`Zygote::spawn()`], but the new process will have the same parent process
-    /// as the current zygote.
-    ///
-    /// ```rust
-    /// # use zygote::Zygote;
-    /// # let zygote = Zygote::new();
-    /// # fn getppid() -> libc::pid_t { unsafe { libc::getppid() } }
-    /// # fn getpid() -> libc::pid_t { unsafe { libc::getpid() } }
     /// let ppid = zygote.run(|_| getppid(), ());
     ///
-    /// let zygote2 = zygote.spawn_sibling();
+    /// let zygote2 = zygote.spawn();
     /// let ppid2 = zygote2.run(|_| getppid(), ());
     ///
     /// assert_eq!(ppid, ppid2); // zygote2 and zygote share the same parent
@@ -287,12 +262,9 @@ impl Zygote {
     ///
     /// # Panics
     /// Same panic conditions as [`Zygote::new()`].
-    pub fn spawn_sibling(&self) -> Zygote {
-        self.spawn_impl(true).unwrap()
-    }
-
-    fn spawn_impl(&self, sibling: bool) -> Result<Zygote, Error> {
-        self.try_run(spawner, sibling)
+    pub fn spawn(&self) -> Zygote {
+        let inner = self.try_run(spawner, ()).unwrap();
+        Zygote(inner)
     }
 }
 
@@ -302,26 +274,41 @@ impl Default for Zygote {
     }
 }
 
-fn clone3(flags: u64, exit_signal: u64) -> io::Result<Option<pid_t>> {
+impl Drop for Zygote {
+    fn drop(&mut self) {
+        let pidfd = self.0.pidfd.as_raw_fd();
+        unsafe { libc::syscall(libc::SYS_pidfd_send_signal, pidfd, SIGKILL, 0, 0) };
+        let pidfd = self.0.pidfd.as_fd();
+        let _ = waitid(Id::PIDFd(pidfd), WaitPidFlag::WEXITED);
+    }
+}
+
+fn clone3(flags: u64, exit_signal: u64) -> io::Result<Option<OwnedFd>> {
     let mut args = [flags, 0, 0, 0, exit_signal, 0, 0, 0, 0, 0, 0];
     let args_ptr = std::ptr::from_mut(&mut args);
     let args_size = std::mem::size_of_val(&args);
-    match unsafe { libc::syscall(libc::SYS_clone3, args_ptr, args_size) } {
+    let res = unsafe { libc::syscall(libc::SYS_clone3, args_ptr, args_size) };
+    match res {
         0 => Ok(None),
-        pid @ 1.. => Ok(Some(pid as pid_t)),
+        pid @ 1.. => {
+            let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as pid_t, 0) };
+            let pidfd = unsafe { OwnedFd::from_raw_fd(pidfd as _) };
+            Ok(Some(pidfd))
+        }
         -1 => Err(io::Error::last_os_error()),
         _ => Err(io::Error::other("unknown")),
     }
 }
 
-fn spawner(sibling: bool) -> Zygote {
-    Zygote::new_impl(sibling)
+fn spawner(_: ()) -> ZygoteImpl {
+    let zygote = Zygote::new_impl(true);
+    unsafe { transmute(zygote) }
 }
 
 fn zygote_start(pipe: Pipe) -> ! {
     match zygote_main(pipe) {
         Ok(()) => std::process::exit(0),
-        Err(Error::Io(err)) if err.kind() == UnexpectedEof => {
+        Err(Error::Io(err)) if err.kind() == UnexpectedEof || err.kind() == BrokenPipe => {
             std::process::exit(0);
         }
         Err(_) => {
