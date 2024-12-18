@@ -1,10 +1,9 @@
 use std::any::Any;
-use std::panic::UnwindSafe;
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-pub trait Wire: Serialize + DeserializeOwned + Any + UnwindSafe {
+pub trait Wire: Serialize + DeserializeOwned + Any {
     fn deserialize(buf: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
         rmp_serde::from_slice(buf)
     }
@@ -18,7 +17,7 @@ pub trait Wire: Serialize + DeserializeOwned + Any + UnwindSafe {
     }
 }
 
-impl<T: Serialize + DeserializeOwned + Any + UnwindSafe> Wire for T {}
+impl<T: Serialize + DeserializeOwned + Any> Wire for T {}
 
 pub trait AsWire<T: Wire> {
     fn deserialize(buf: &[u8]) -> Result<T, rmp_serde::decode::Error> {

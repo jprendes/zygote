@@ -342,8 +342,12 @@ where
     Result<Ret, WireError>: Wire,
 {
     let f: fn(Args) -> Ret = unsafe { transmute(f) };
-    let args = pipe.recv::<Args>()?;
-    let res = catch_unwind(|| f(args)).map_err(|_| take_panic());
+    let args = pipe.recv_delayed()?;
+    let res = catch_unwind(move || -> Result<Ret, WireError> {
+        let args = args.deserialize::<Args>()?;
+        Ok(f(args))
+    })
+    .unwrap_or_else(|_| Err(take_panic()));
     pipe.send(res)?;
     Ok(())
 }

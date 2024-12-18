@@ -39,6 +39,18 @@ impl AsFd for Pipe {
 }
 
 impl Pipe {
+    fn write_type_id<T: ?Sized + 'static>(&mut self) -> io::Result<()> {
+        let tag: [u8; size_of::<TypeId>()] = unsafe { transmute(TypeId::of::<T>()) };
+        self.0.write_all(&tag)
+    }
+
+    fn read_type_id(&mut self) -> io::Result<TypeId> {
+        let mut tag = [0u8; size_of::<TypeId>()];
+        self.0.read_exact(&mut tag)?;
+        let tag: TypeId = unsafe { transmute(tag) };
+        Ok(tag)
+    }
+
     fn write_usize(&mut self, n: usize) -> io::Result<()> {
         self.0.write_all(&n.to_ne_bytes())
     }
@@ -83,63 +95,72 @@ impl Pipe {
     }
 
     pub fn send<T: Wire>(&mut self, data: impl AsWire<T>) -> Result<(), Error> {
-        let tag: [u8; size_of::<TypeId>()] = unsafe { transmute(TypeId::of::<T>()) };
-        let mut bytes: Vec<u8> = tag.into();
-
         let n = swap_fds(vec![]).len();
         assert_eq!(n, 0, "orphaned file descriptors in channel");
 
-        data.serialize_into(&mut bytes)?;
+        let bytes = data.serialize()?;
 
         // safety: BorrowedFd is repr(transparent) over RawFd
         let fds: Vec<BorrowedFd<'_>> = unsafe { transmute(swap_fds(vec![])) };
 
+        self.write_type_id::<T>()?;
         self.write_sized(&bytes)?;
         self.write_fds(&fds)?;
 
         Ok(())
     }
 
-    pub fn recv_into<T: Wire>(&mut self, buffer: &mut Vec<u8>) -> Result<T, Error> {
+    pub fn recv_parts_into(&mut self, type_id: &mut TypeId, buffer: &mut Vec<u8>, fds: &mut Vec<OwnedFd>) -> Result<(), Error> {
+        *type_id = self.read_type_id()?;
         *buffer = self.read_sized()?;
-        let fds = self.read_fds()?;
+        *fds = self.read_fds()?;
+        Ok(())
+    }
 
-        if buffer.len() < size_of::<TypeId>() {
-            return Err(Error::Decode(rmp_serde::decode::Error::Uncategorized(
-                format!("Invalid type id for {}", type_name::<T>()),
-            )));
-        }
+    pub fn recv_delayed(&mut self) -> Result<DelayedRecv, Error> {
+        let mut delayed_recv = DelayedRecv {
+            type_id: TypeId::of::<u8>(),
+            buffer: vec![],
+            fds: vec![],
+        };
 
-        let mut tag = [0u8; size_of::<TypeId>()];
-        tag.clone_from_slice(&buffer[..size_of::<TypeId>()]);
-        let tag: TypeId = unsafe { transmute(tag) };
+        self.recv_parts_into(&mut delayed_recv.type_id, &mut delayed_recv.buffer, &mut delayed_recv.fds)?;
 
-        let buffer = &buffer[size_of::<TypeId>()..];
+        Ok(delayed_recv)
+    }
 
-        if tag != TypeId::of::<T>() {
+    pub fn recv<T: Wire>(&mut self) -> Result<T, Error> {
+        self.recv_delayed()?.deserialize::<T>()
+    }
+}
+
+pub struct DelayedRecv {
+    type_id: TypeId,
+    buffer: Vec<u8>,
+    fds: Vec<OwnedFd>,
+}
+
+impl DelayedRecv {
+    pub fn deserialize<T: Wire>(self) -> Result<T, Error> {
+        if self.type_id != TypeId::of::<T>() {
             return Err(Error::Decode(rmp_serde::decode::Error::Uncategorized(
                 format!("Invalid type id for {}", type_name::<T>()),
             )));
         }
 
         // safety: OwnedFd is repr(transparent) over RawFd
-        let fds: Vec<RawFd> = unsafe { transmute(fds) };
+        let fds: Vec<RawFd> = unsafe { transmute(self.fds) };
 
         let n = swap_fds(fds).len();
         assert_eq!(n, 0, "orphaned file descriptors in channel");
 
-        let res = <T as Wire>::deserialize(buffer)?;
+        let res = <T as Wire>::deserialize(&self.buffer)?;
 
         // safety: OwnedFd is repr(transparent) over RawFd
         let fds: Vec<OwnedFd> = unsafe { transmute(swap_fds(vec![])) };
         assert_eq!(fds.len(), 0, "orphaned file descriptors in channel");
 
         Ok(res)
-    }
-
-    pub fn recv<T: Wire>(&mut self) -> Result<T, Error> {
-        let mut buffer = Vec::default();
-        self.recv_into(&mut buffer)
     }
 }
 
