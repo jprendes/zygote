@@ -5,7 +5,13 @@ use std::os::unix::net::UnixStream as StdUnixStream;
 
 use nix::sys::socket::{recvmsg, sendmsg, ControlMessage, ControlMessageOwned, MsgFlags};
 
-pub(super) const SCM_MAX_FD: usize = 253; // see https://man7.org/linux/man-pages/man7/unix.7.html
+// According to https://man7.org/linux/man-pages/man7/unix.7.html
+// we can send up to 253 FDs per message, however until recently
+// in musl targets the buffer was limit to 1024 bytes, which holds
+// slightly less than 253 elements.
+// See https://www.openwall.com/lists/musl/2023/02/09/10
+// Using 250 seems to work reliably.
+pub(super) const SCM_MAX_FD: usize = 250;
 
 pub struct UnixStream {
     inner: StdUnixStream,
