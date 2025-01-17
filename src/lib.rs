@@ -25,7 +25,8 @@ use std::sync::{LazyLock, Mutex};
 
 pub use error::{Error, WireError};
 pub use fd::WireFd;
-use libc::{pid_t, CLONE_PARENT, SIGCHLD, SIGKILL};
+use libc::{CLONE_PARENT, SIGCHLD, SIGKILL};
+use nix::sched::CloneFlags;
 use nix::sys::wait::{waitid, Id, WaitPidFlag};
 use pipe::Pipe;
 use serde::{Deserialize, Serialize};
@@ -146,9 +147,9 @@ impl Zygote {
     fn new_impl(sibling: bool) -> Zygote {
         let (child_pipe, parent_pipe) = Pipe::pair().unwrap();
         let pidfd = if sibling {
-            clone3(CLONE_PARENT as _, 0).unwrap()
+            clone3_or_clone(CLONE_PARENT, 0).unwrap()
         } else {
-            clone3(0, SIGCHLD as _).unwrap()
+            clone3_or_clone(0, SIGCHLD).unwrap()
         };
         match pidfd {
             None => {
@@ -273,21 +274,63 @@ impl Drop for Zygote {
     }
 }
 
-fn clone3(flags: u64, exit_signal: u64) -> io::Result<Option<OwnedFd>> {
-    let mut args = [flags, 0, 0, 0, exit_signal, 0, 0, 0, 0, 0, 0];
+fn clone3_or_clone(flags: i32, exit_signal: i32) -> io::Result<Option<OwnedFd>> {
+    #[cfg(feature = "clone3")]
+    if let Ok(res) = clone3(flags, exit_signal) {
+        return Ok(res);
+    }
+    clone(flags, exit_signal)
+}
+
+#[cfg(feature = "clone3")]
+fn clone3(flags: i32, exit_signal: i32) -> io::Result<Option<OwnedFd>> {
+    let mut args = [flags as u64, 0, 0, 0, exit_signal as u64, 0, 0, 0, 0, 0, 0];
     let args_ptr = std::ptr::from_mut(&mut args);
     let args_size = std::mem::size_of_val(&args);
     let res = unsafe { libc::syscall(libc::SYS_clone3, args_ptr, args_size) };
     match res {
         0 => Ok(None),
         pid @ 1.. => {
-            let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid as pid_t, 0) };
+            let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
             let pidfd = unsafe { OwnedFd::from_raw_fd(pidfd as _) };
             Ok(Some(pidfd))
         }
         -1 => Err(io::Error::last_os_error()),
         _ => Err(io::Error::other("unknown")),
     }
+}
+
+fn clone(flags: i32, exit_signal: i32) -> io::Result<Option<OwnedFd>> {
+    // For sjlj information see: https://llvm.org/docs/ExceptionHandling.html#llvm-eh-sjlj-setjmp
+    let mut jmp_buf = [0u16; 128];
+    extern "C" {
+        #[link_name = "setjmp"]
+        fn setjmp(buf: *mut u16) -> i32;
+        #[link_name = "longjmp"]
+        fn longjmp(buf: *mut u16, val: i32) -> !;
+    }
+    let res = unsafe { setjmp(jmp_buf.as_mut_ptr()) };
+    match res {
+        0 => {}
+        1 => return Ok(None),
+        _ => return Err(io::Error::other("unknown")),
+    }
+    let f = Box::new(|| {
+        unsafe { longjmp(jmp_buf.as_mut_ptr(), 1) };
+    });
+    // we need a stack just big enough to reach the longjmp
+    let mut stack = [0; 1024];
+    let pid = unsafe {
+        nix::sched::clone(
+            f,
+            &mut stack,
+            CloneFlags::from_bits(flags).unwrap(),
+            Some(exit_signal),
+        )
+    }?;
+    let pidfd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
+    let pidfd = unsafe { OwnedFd::from_raw_fd(pidfd as _) };
+    return Ok(Some(pidfd));
 }
 
 fn spawner(_: ()) -> ZygoteImpl {

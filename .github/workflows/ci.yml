@@ -18,6 +18,7 @@ jobs:
       matrix:
         arch: ["aarch64", "x86_64"]
         libc: ["gnu", "musl"]
+        features: ["", "clone3"]
     runs-on: ubuntu-24.04${{ matrix.arch == 'aarch64' && '-arm' || '' }}
     steps:
       - uses: actions/checkout@v4

@@ -110,7 +110,12 @@ impl Pipe {
         Ok(())
     }
 
-    pub fn recv_parts_into(&mut self, type_id: &mut TypeId, buffer: &mut Vec<u8>, fds: &mut Vec<OwnedFd>) -> Result<(), Error> {
+    pub fn recv_parts_into(
+        &mut self,
+        type_id: &mut TypeId,
+        buffer: &mut Vec<u8>,
+        fds: &mut Vec<OwnedFd>,
+    ) -> Result<(), Error> {
         *type_id = self.read_type_id()?;
         *buffer = self.read_sized()?;
         *fds = self.read_fds()?;
@@ -124,7 +129,11 @@ impl Pipe {
             fds: vec![],
         };
 
-        self.recv_parts_into(&mut delayed_recv.type_id, &mut delayed_recv.buffer, &mut delayed_recv.fds)?;
+        self.recv_parts_into(
+            &mut delayed_recv.type_id,
+            &mut delayed_recv.buffer,
+            &mut delayed_recv.fds,
+        )?;
 
         Ok(delayed_recv)
     }

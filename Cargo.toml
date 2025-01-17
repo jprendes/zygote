@@ -13,7 +13,8 @@ rmp-serde = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
-nix = { version = "0.29", features = ["socket", "uio", "signal"] }
+nix = { version = "0.29", features = ["socket", "uio", "signal", "sched", "process"] }
 
-[dev-dependencies]
-nix = { version = "0.29", features = ["process"]}
+[features]
+default = ["clone3"]
+clone3 = []
