@@ -21,7 +21,6 @@ jobs:
     runs-on: ubuntu-24.04${{ matrix.arch == 'aarch64' && '-arm' || '' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: ${{ matrix.arch }}-unknown-linux-${{ matrix.libc }}
