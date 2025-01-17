@@ -198,7 +198,7 @@ impl Zygote {
     /// # Panics
     /// This method panics if communication with the zygote fails or
     /// if the task itself panics.
-    /// For a non panicing version of this method see [`Zygote::try_run()`].
+    /// For a non panicking version of this method see [`Zygote::try_run()`].
     pub fn run<Args: Wire, Ret: Wire>(&self, f: fn(Args) -> Ret, args: impl AsWire<Args>) -> Ret {
         self.try_run(f, args).unwrap()
     }
